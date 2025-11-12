@@ -269,15 +269,17 @@ static void task1(const char* input, const char* output)
 
     // Write image
     bmp::writeBMP(output, img);
-    std::cout << "Binarized image saved as task1.bmp\n";
+    std::cout << "Binarized image saved as " << output << "\n";
 }
 
 // Label the forest regions with 4-connected neighbors, assign unique colors, and draw bounding boxes
 // Label components on mask, draw boxes on original
-static void task2(const char* maskPath, const char* originalPath, const char* output)
+static void task2(const char* maskPath, const char* originalPath, const char* outputFill, const char* outputBox)
 {
+    // mask = task1.bmp(binarized image)
     bmp::BMPImage mask = bmp::readBMP(maskPath);
     bmp::BMPImage original = bmp::readBMP(originalPath);
+    bmp::BMPImage BBox = original;  
 
     const int width  = mask.width;
     const int height = mask.height;
@@ -287,87 +289,91 @@ static void task2(const char* maskPath, const char* originalPath, const char* ou
         throw std::runtime_error("mask and original size mismatch");
 
     std::vector<int> visited(width * height);
-    std::vector<std::tuple<int,int,int,int>> boxes;
+    const int MIN_FOREST_AREA = 5000; // Minimum pixel count for a valid region
 
-    const int MIN_FOREST_AREA = 5000; // Minimum area to keep forest region
+    int regionIndex = 0;
 
-    // Scan for unvisited black pixels
     for (int r = 0; r < height; ++r) {
         for (int c = 0; c < width; ++c) {
-            // if not visited and is black pixel
             if (!visited[r * width + c]) {
-
-                // px points to the pixel at (r, c) in mask
                 uint8_t* px = &mask.data[r * rowSize + c * 3];
 
-                // If it's a black pixel
+                // If it's black pixel (RGB=0)
                 if (px[0] == 0 && px[1] == 0 && px[2] == 0) {
                     std::vector<std::pair<int, int>> component_pixels;
-
-                    // Perform BFS to find all connected black pixels
                     bfs(mask, rowSize, width, height, visited, r, c, component_pixels, false);
 
-                    // Find bounding box
-                    /*
-                        Find the min and max row and column indices among the component(component_pixels) pixels
-                    */
-                    int minR = height, maxR = -1, minC = width, maxC = -1;
+                    int area = (int)component_pixels.size();
+                    if (area < MIN_FOREST_AREA) 
+                        continue;  // skip small regions
 
-                    // iterates through every pixel coordinate (row, column) in the component
+                    // red, green, blue colors 
+                    uint8_t rColor = (regionIndex % 3 == 0) ? 255 : 0; // Red for regionIndex % 3 == 0
+                    uint8_t gColor = (regionIndex % 3 == 1) ? 255 : 0; // Green for regionIndex % 3 == 1
+                    uint8_t bColor = (regionIndex % 3 == 2) ? 255 : 0; // Blue for regionIndex % 3 == 2
+
+                    // Fill the region with color
+                    int minR = height, maxR = -1, minC = width, maxC = -1;
                     for (const auto& p : component_pixels) {
-                        if (p.first < minR) minR = p.first;
-                        if (p.first > maxR) maxR = p.first;
-                        if (p.second < minC) minC = p.second;
-                        if (p.second > maxC) maxC = p.second;
+                        int rr = p.first, cc = p.second;
+                        uint8_t* opx = &original.data[rr * rowSize + cc * 3];
+                        opx[0] = bColor;
+                        opx[1] = gColor;
+                        opx[2] = rColor;
+
+                        minR = std::min(minR, rr);
+                        maxR = std::max(maxR, rr);
+                        minC = std::min(minC, cc);
+                        maxC = std::max(maxC, cc);
                     }
 
-                    // Only keep large enough black regions
-                    if ((int)component_pixels.size() >= MIN_FOREST_AREA)
-                    
-                        // Add one new bounding box into vector.
-                        boxes.emplace_back(minR, minC, maxR, maxC);
+                    // Compute centroid (average of pixels)
+                    long sumR = 0, sumC = 0;
+                    for (const auto& p : component_pixels) {
+                        sumR += p.first;
+                        sumC += p.second;
+                    }
+                    int centroid_R = (int)(sumR / component_pixels.size());
+                    int centroid_C = (int)(sumC / component_pixels.size());
+
+                    std::cout << "Region " << regionIndex + 1 << ": Area=" << area << ", Centroid=(" << centroid_C << "," << centroid_R << ")\n";
+
+                    // Draw bounding box 
+                    uint8_t red_Box = std::min(255, rColor + 60);
+                    uint8_t green_Box = std::min(255, gColor + 60);
+                    uint8_t blue_Box = std::min(255, bColor + 60);
+
+                    drawBoundingBox(BBox, minR, minC, maxR, maxC, red_Box, green_Box, blue_Box, 2);
+
+                    // Draw centroid cross 
+                    const int size = 5;
+                    for (int dr = -size; dr <= size; ++dr) {
+                        for (int dc = -size; dc <= size; ++dc) {
+                            if ((dr == 0 || dc == 0) &&
+                                centroid_R + dr >= 0 && centroid_R + dr < height &&
+                                centroid_C + dc >= 0 && centroid_C + dc < width) {
+
+                                // centroid_pointer: pointer to centroid pixel in BBox image
+                                uint8_t* centroid_pointer = &BBox.data[(centroid_R + dr) * rowSize + (centroid_C + dc) * 3];
+                                centroid_pointer[0] = 255; centroid_pointer[1] = 255; centroid_pointer[2] = 0;
+                            }
+                        }
+                    }
+
+                    regionIndex++;
                 }
             }
         }
     }
 
-    // Draw bounding boxes and label centroids
-    for (int i = 0; i < (int)boxes.size(); ++i) {
-        int minR, minC, maxR, maxC;
-        std::tie(minR, minC, maxR, maxC) = boxes[i];
+    bmp::writeBMP(outputFill, original);
+    bmp::writeBMP(outputBox, BBox);
 
-        // label with different colors
-        uint8_t rColor = (i % 3 == 0) ? 255 : 0;
-        uint8_t gColor = (i % 3 == 1) ? 255 : 0;
-        uint8_t bColor = (i % 3 == 2) ? 255 : 0;
-
-        drawBoundingBox(original, minR, minC, maxR, maxC, rColor, gColor, bColor, 2);
-
-        // Calculate centroid and area
-        int centroidR = (minR + maxR) / 2;
-        int centroidC = (minC + maxC) / 2;
-        int area = (maxR - minR + 1) * (maxC - minC + 1);
-
-        std::cout << "Box " << i + 1 << ": Centroid=(" << centroidC << "," << centroidR
-                  << "), Area=" << area << "\n";
-
-        // Mark centroid on the image(A cross)
-        const int centroidSize = 5; // Size of the cross for the centroid
-        for (int dr = -centroidSize; dr <= centroidSize; ++dr) {
-            for (int dc = -centroidSize; dc <= centroidSize; ++dc) {
-                if ((dr == 0 || dc == 0) && centroidR + dr >= 0 && centroidR + dr < height && centroidC + dc >= 0 && centroidC + dc < width) {
-                    uint8_t* centroidPx = &original.data[(centroidR + dr) * rowSize + (centroidC + dc) * 3];
-                    centroidPx[0] = 0; centroidPx[1] = 255; centroidPx[2] = 255; 
-                }
-            }
-        }
-    }
-
-    bmp::writeBMP(output, original);
-    std::cout << "Filtered and labeled forest regions saved as " << output << "\n";
+    std::cout << "Filled-only image saved as: " << outputFill << std::endl;
+    std::cout << "Filled + bounding box image saved as: " << outputBox << std::endl;
 }
 
-static void task3(const char* input, const char* output, bool analyzeTime)
+std::pair<double, double> task3(const char* input, const char* output, bool analyzeTime, bool LongestAxis, bool targetWhite=true)
 {
     using namespace std::chrono;
 
@@ -437,11 +443,18 @@ static void task3(const char* input, const char* output, bool analyzeTime)
             // If not visited
             if (!visited[sr * width + sc]) {
                 uint8_t* px = &dilated.data[sr * rowSize + sc * 3];
-                if (px[0] == 255 && px[1] == 255 && px[2] == 255) { // white pixel
+
+                // based on targetWhite flag
+                bool isTarget = targetWhite
+                    ? (px[0] == 255 && px[1] == 255 && px[2] == 255)   // white pixel
+                    : (px[0] == 0   && px[1] == 0   && px[2] == 0);   // black pixel
+
+                if (isTarget) {
                     std::vector<std::pair<int, int>> component_pixels;
-                    
-                    // Perform BFS to find all connected white pixels
-                    bfs(dilated, rowSize, width, height, visited, sr, sc, component_pixels, true);
+
+                    // Perform BFS to find all connected target pixels
+                    bfs(dilated, rowSize, width, height, visited, sr, sc,
+                        component_pixels, targetWhite);
 
                     // If component area is less than MIN_ROAD_AREA, set all its pixels to black
                     if ((int)component_pixels.size() < MIN_ROAD_AREA) {
@@ -556,6 +569,12 @@ static void task3(const char* input, const char* output, bool analyzeTime)
     double angle = std::atan2(p2.first - p1.first, p2.second - p1.second) * 180.0 / M_PI;
     std::cout << "Longest axis length: " << maxDist << "\n";
     std::cout << "Orientation (degrees): " << angle << "\n";
+    
+    // Return the longest axis length and orientation as a callback
+    if (LongestAxis) {
+        std::cout << "Returning longest axis length and orientation as callback.\n";
+        return std::make_pair(maxDist, angle);
+    }
 
     // Draw the longest axis on the image
     uint8_t* p1Px = &dilated.data[p1.first * rowSize + p1.second * 3];
@@ -607,7 +626,7 @@ static void task3(const char* input, const char* output, bool analyzeTime)
 
     // Output timing information and time complexity analysis
     if (!analyzeTime) 
-        return;
+        return std::make_pair(0.0, 0.0);
 
     auto stage1_duration = duration_cast<microseconds>(stage1_end - stage1_start).count();
     auto stage2_duration = duration_cast<microseconds>(stage2_end - stage2_start).count();
@@ -632,12 +651,15 @@ static void task3(const char* input, const char* output, bool analyzeTime)
     std::cout << " Stage 4 (Property Analysis): O(H * W)\n";
     std::cout << " Stage 5 (Bounding Box Drawing): O(H * W)\n";
     std::cout << " Overall Time Complexity: O(H * W * K^2), as morphological operations dominate\n";
+
+    return std::make_pair(0.0, 0.0);
 }
 
 static void task4()
 {
-    task3("Ian_island_square.bmp","task3.bmp",true);
+    task3("Ian_island_square.bmp","task3.bmp",true,false);
 }   
+
 int main() {
     std::cout << "----- Homework 2 Menu -----\n";
     while (true) {
@@ -660,8 +682,8 @@ int main() {
 
         switch (choice) {
             case 1: task1("Ian_island_square.bmp","task1.bmp"); break;
-            case 2: task2("task1.bmp","Ian_island_square.bmp","task2.bmp"); break;
-            case 3: task3("Ian_island_square.bmp","task3.bmp",false); break;
+            case 2: task2("task1.bmp","Ian_island_square.bmp","task2_fill.bmp", "task2.bmp"); break;
+            case 3: task3("Ian_island_square.bmp","task3.bmp",false,false); break;
             case 4: task4(); break;
             default: std::cout << "Unknown selection. Try 0-７.\n"; break; 
         }
