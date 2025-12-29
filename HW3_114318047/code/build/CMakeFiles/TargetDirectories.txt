@@ -1,0 +1,4 @@
+/home/stanley/NTUT_master/ACV/HW3_114318047/code/build/CMakeFiles/HW3.dir
+/home/stanley/NTUT_master/ACV/HW3_114318047/code/build/CMakeFiles/HW3_opencv.dir
+/home/stanley/NTUT_master/ACV/HW3_114318047/code/build/CMakeFiles/edit_cache.dir
+/home/stanley/NTUT_master/ACV/HW3_114318047/code/build/CMakeFiles/rebuild_cache.dir
